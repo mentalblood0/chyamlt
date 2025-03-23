@@ -1,0 +1,13 @@
+name: chyamlt
+version: 0.1.0
+
+authors:
+  - mentalblood0 <necheporenko.stepan@yandex.ru>
+
+targets:
+  chyamlt:
+    main: src/chyamlt.cr
+
+crystal: '>= 1.15.1'
+
+license: MIT
