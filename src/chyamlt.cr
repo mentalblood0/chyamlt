@@ -7,8 +7,8 @@ module Chyamlt
   class Message
     include YAML::Serializable
 
-    getter received : Time?
-    getter sender : String?
+    getter received : Time
+    getter sender : String
     getter text : String
 
     def initialize(@sender, @text)
@@ -16,19 +16,32 @@ module Chyamlt
     end
   end
 
+  class Package
+    include YAML::Serializable
+
+    getter saved : Int64
+    getter messages : Array(Message)
+
+    def initialize(@saved, @messages = [] of Message)
+    end
+  end
+
+  class_property dir
+  {% if flag?(:windows) %}
+    @@dir = Path.new("~", "AppData", "chyamlt").expand(home: true)
+  {% else %}
+    @@dir = Path.new("~", ".config", "chyamlt").expand(home: true)
+  {% end %}
+
   class Server
-    {% if flag?(:windows) %}
-      @@path = Path.new("~", "AppData", "chyamlt", "server.yml").expand(home: true)
-    {% else %}
-      @@path = Path.new("~", ".config", "chyamlt", "server.yml").expand(home: true)
-    {% end %}
+    @@messages_path = Chyamlt.dir / "server.yml"
 
     @messages : Array(Message)
 
     def initialize(@host : String, @port : Int32)
       Dir.mkdir_p @@path.parent
       @file = File.new @@path, "a"
-      @messages = Array(Message).from_yaml File.new @@path rescue [] of Message
+      @messages = Array(Message).from_yaml File.new @@messages_path rescue [] of Message
       @handler = HTTP::WebSocketHandler.new do |ws, ctx|
         Log.info { "SERVER : Connection from client #{ctx.request.remote_address}" }
         ws.on_message do |text|
@@ -48,20 +61,21 @@ module Chyamlt
   end
 
   class Client
-    {% if flag?(:windows) %}
-      @@path = Path.new("~", "AppData", "chyamlt", "client.yml").expand(home: true)
-    {% else %}
-      @@path = Path.new("~", ".config", "chyamlt", "client.yml").expand(home: true)
-    {% end %}
+    @@messages_path = Chyamlt.dir / "client.yml"
+    @@input_path = Chyamlt.dir / "input.yml"
 
-    @messages : Array(Message)
+    @size = 0
 
-    @i = 0
-    @buf = [] of String
+    def size
+    end
 
     def initialize(@host : String, @port : Int32)
-      Dir.mkdir_p @@path.parent
+      Dir.mkdir_p @@dir
       @messages = Array(Message).from_yaml File.new @@path rescue [] of Message
+
+      File.each_line @@messages_path do |line|
+        @size += 1 if line.starts_with "- "
+      end
 
       @uri = URI.parse "wb://#{@host}:#{@port}"
       @socket = HTTP::WebSocket.new @uri
