@@ -5,6 +5,13 @@ require "http/server/handler"
 require "uri"
 
 module Chyamlt
+  class_property dir
+  {% if flag?(:windows) %}
+    @@dir = Path.new("~", "AppData", "chyamlt").expand(home: true)
+  {% else %}
+    @@dir = Path.new("~", ".config", "chyamlt").expand(home: true)
+  {% end %}
+
   class ServerMessage
     include YAML::Serializable
 
@@ -42,13 +49,6 @@ module Chyamlt
     def initialize(@messages)
     end
   end
-
-  class_property dir
-  {% if flag?(:windows) %}
-    @@dir = Path.new("~", "AppData", "chyamlt").expand(home: true)
-  {% else %}
-    @@dir = Path.new("~", ".config", "chyamlt").expand(home: true)
-  {% end %}
 
   class Server
     class_property messages_path
@@ -153,26 +153,25 @@ module Chyamlt
             Array(ClientMessage).from_yaml File.read @@input_path
           rescue ex
             Log.error { "CLIENT : Error parsing Array(ClientMessage) : #{ex.message}" }
-            last_check = Time.utc
-            sleep 0.2.seconds
-            next
           end
-          Log.debug { "CLIENT : Sending new messages" }
-          response = @client.post "/", body: ClientPackage.new(@size, new_messages).to_yaml
-          Log.debug { "CLIENT : Sent new messages" }
-          if !response.success?
-            Log.error { "CLIENT : Non-success response #{response.status}" }
-          else
-            add_messages response.body
+          if new_messages
+            Log.debug { "CLIENT : Sending new messages" }
+            response = @client.post "/", body: ClientPackage.new(@size, new_messages).to_yaml
+            Log.debug { "CLIENT : Sent new messages" }
+            if !response.success?
+              Log.error { "CLIENT : Non-success response #{response.status}" }
+            else
+              add_messages response.body
+            end
           end
+          last_check = Time.utc
+          sleep 0.2.seconds
         end
-        last_check = Time.utc
-        sleep 0.2.seconds
       end
     end
 
     def close
-      @socket.close
+      @client.close
     end
 
     def self.wipe
