@@ -95,7 +95,7 @@ module Chyamlt
     end
 
     def initialize(@host : String, @port : Int32)
-      @server = HTTP::Server.new [MessageHandler.new]
+      @server = HTTP::Server.new [HTTP::CompressHandler.new, MessageHandler.new]
       @address = @server.bind_tcp @host, @port
       spawn @server.listen
     end
@@ -120,6 +120,7 @@ module Chyamlt
     def initialize(@host : String, @port : Int32)
       @address = "http://#{@host}:#{@port}"
       @client = HTTP::Client.new URI.parse @address
+      @client.compress = true
 
       Dir.mkdir_p @@messages_path.parent
       Dir.mkdir_p @@input_path.parent
