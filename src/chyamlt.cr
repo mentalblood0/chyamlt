@@ -66,14 +66,19 @@ module Chyamlt
         Log.info { "SERVER : Connection from client #{address}" }
         ws.on_message do |text|
           Log.debug { "SERVER : Parsing new messages" }
-          pkg = ClientPackage.from_yaml text
+          pkg = begin
+            ClientPackage.from_yaml text
+          rescue ex
+            Log.error { "CLIENT : Error parsing ClientPackage : #{ex.message}" }
+            next
+          end
           Log.info { "SERVER : #{pkg.messages.size} messages from client #{address} (#{pkg.saved} are already saved)" }
 
           new_messages = pkg.messages.map { |client_message| ServerMessage.new address, client_message }
 
           @@messages_file.print new_messages.to_yaml[4..]
           @@messages_file.flush
-          new_messages.each { |msg| @messages << msg }
+          @messages += new_messages
 
           ws.send ServerPackage.new(@messages[pkg.saved..]).to_yaml
         end
@@ -103,8 +108,14 @@ module Chyamlt
       @socket = HTTP::WebSocket.new @address
       @socket.on_message do |text|
         Log.debug { "CLIENT : Parsing received messages" }
-        pkg = ServerPackage.from_yaml text
+        pkg = begin
+          ServerPackage.from_yaml text
+        rescue ex
+          Log.error { "CLIENT : Error parsing ServerPackage : #{ex.message}" }
+          next
+        end
         Log.info { "CLIENT : #{pkg.messages.size} messages from server #{@address}" }
+
         @size += pkg.messages.size
         @@messages.print pkg.messages.to_yaml[4..]
         @@messages.flush
@@ -118,7 +129,14 @@ module Chyamlt
       loop do
         if File.exists?(@@input_path) && (!last_check || File.info(@@input_path).modification_time > last_check)
           Log.debug { "CLIENT : Reading new messages" }
-          new_messages = Array(ClientMessage).from_yaml File.read @@input_path
+          new_messages = begin
+            Array(ClientMessage).from_yaml File.read @@input_path
+          rescue ex
+            Log.error { "CLIENT : Error parsing Array(ClientMessage) : #{ex.message}" }
+            last_check = Time.utc
+            sleep 0.2.seconds
+            next
+          end
           Log.debug { "CLIENT : Sending new messages" }
           @socket.send ClientPackage.new(@size, new_messages).to_yaml
           Log.debug { "CLIENT : Sent new messages" }
