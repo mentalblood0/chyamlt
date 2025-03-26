@@ -74,7 +74,9 @@ module Chyamlt
           end
           Log.info { "SERVER : #{pkg.messages.size} messages from client #{address} (#{pkg.saved} are already saved)" }
 
-          new_messages = pkg.messages.map { |client_message| ServerMessage.new address, client_message }
+          new_messages = pkg.messages
+            .select { |client_message| client_message.text.size > 0 }
+            .map { |client_message| ServerMessage.new address, client_message }
 
           @@messages_file.print new_messages.to_yaml[4..]
           @@messages_file.flush
@@ -88,11 +90,20 @@ module Chyamlt
       @address = @server.bind_tcp @host, @port
       spawn @server.listen
     end
+
+    def close
+      @server.close
+    end
+
+    def self.wipe
+      @@messages_file.close
+      File.delete @@messages_path
+    end
   end
 
   class Client
     @@messages_path : Path = Chyamlt.dir / "client.yml"
-    @@messages = File.new @@messages_path, "a"
+    @@messages_file = File.new @@messages_path, "a"
     @@input_path : Path = Chyamlt.dir / "input.yml"
 
     @size = 0
@@ -117,8 +128,8 @@ module Chyamlt
         Log.info { "CLIENT : #{pkg.messages.size} messages from server #{@address}" }
 
         @size += pkg.messages.size
-        @@messages.print pkg.messages.to_yaml[4..]
-        @@messages.flush
+        @@messages_file.print pkg.messages.to_yaml[4..]
+        @@messages_file.flush
         File.delete @@input_path
       end
       spawn @socket.run
@@ -144,6 +155,16 @@ module Chyamlt
         last_check = Time.utc
         sleep 0.2.seconds
       end
+    end
+
+    def close
+      @socket.close
+    end
+
+    def self.wipe
+      @@messages.close
+      File.delete @@messages_path
+      File.delete @@input_path
     end
   end
 end
