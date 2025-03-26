@@ -4,25 +4,41 @@ require "http/web_socket"
 require "uri"
 
 module Chyamlt
-  class Message
+  class ServerMessage
     include YAML::Serializable
 
     getter received : Time
     getter sender : String
     getter text : String
 
-    def initialize(@sender, @text)
+    def initialize(@sender, client_message : ClientMessage)
       @received = Time.utc
+      @text = client_message.text
     end
   end
 
-  class Package
+  class ClientMessage
+    include YAML::Serializable
+
+    getter text : String
+  end
+
+  class ClientPackage
     include YAML::Serializable
 
     getter saved : Int64
-    getter messages : Array(Message)
+    getter messages : Array(ClientMessage)
 
-    def initialize(@saved, @messages = [] of Message)
+    def initialize(@saved, @messages)
+    end
+  end
+
+  class ServerPackage
+    include YAML::Serializable
+
+    getter messages : Array(ServerMessage)
+
+    def initialize(@messages)
     end
   end
 
@@ -34,26 +50,35 @@ module Chyamlt
   {% end %}
 
   class Server
-    @@messages_path = Chyamlt.dir / "server.yml"
+    @@messages_path : Path = Chyamlt.dir / "server.yml"
+    @@messages_file = File.new @@messages_path, "a"
 
-    @messages : Array(Message)
+    @messages = [] of ServerMessage
 
     def initialize(@host : String, @port : Int32)
-      Dir.mkdir_p @@path.parent
-      @file = File.new @@path, "a"
-      @messages = Array(Message).from_yaml File.new @@messages_path rescue [] of Message
+      Dir.mkdir_p @@messages_path.parent
+      File.open @@messages_path do |file|
+        @messages = Array(ServerMessage).from_yaml file rescue [] of ServerMessage
+      end
+
       @handler = HTTP::WebSocketHandler.new do |ws, ctx|
-        Log.info { "SERVER : Connection from client #{ctx.request.remote_address}" }
+        address = ctx.request.remote_address.to_s
+        Log.info { "SERVER : Connection from client #{address}" }
         ws.on_message do |text|
-          username = ctx.request.remote_address
-          message = Message.new username.to_s, text
-          Log.info { "SERVER : Message \"#{message}\" from client #{username}" }
-          @file.print [message].to_yaml[4..]
-          @file.flush
-          @messages << message
-          ws.send "ok"
+          Log.debug { "SERVER : Parsing new messages" }
+          pkg = ClientPackage.from_yaml text
+          Log.info { "SERVER : #{pkg.messages.size} messages from client #{address} (#{pkg.saved} are already saved)" }
+
+          new_messages = pkg.messages.map { |client_message| ServerMessage.new address, client_message }
+
+          @@messages_file.print new_messages.to_yaml[4..]
+          @@messages_file.flush
+          new_messages.each { |msg| @messages << msg }
+
+          ws.send ServerPackage.new(@messages[pkg.saved..]).to_yaml
         end
       end
+
       @server = HTTP::Server.new [@handler]
       @address = @server.bind_tcp @host, @port
       spawn @server.listen
@@ -61,60 +86,44 @@ module Chyamlt
   end
 
   class Client
-    @@messages_path = Chyamlt.dir / "client.yml"
-    @@input_path = Chyamlt.dir / "input.yml"
+    @@messages_path : Path = Chyamlt.dir / "client.yml"
+    @@messages = File.new @@messages_path, "a"
+    @@input_path : Path = Chyamlt.dir / "input.yml"
 
     @size = 0
 
-    def size
-    end
-
     def initialize(@host : String, @port : Int32)
-      Dir.mkdir_p @@dir
-      @messages = Array(Message).from_yaml File.new @@path rescue [] of Message
-
+      Dir.mkdir_p @@messages_path.parent
+      Dir.mkdir_p @@input_path.parent
       File.each_line @@messages_path do |line|
-        @size += 1 if line.starts_with "- "
+        @size += 1 if line.starts_with? "- "
       end
 
-      @uri = URI.parse "wb://#{@host}:#{@port}"
-      @socket = HTTP::WebSocket.new @uri
-      @socket.on_message do |message|
-        Log.info { "CLIENT : Message \"#{message}\" from server #{@uri}" }
+      @address = URI.parse "wb://#{@host}:#{@port}"
+      @socket = HTTP::WebSocket.new @address
+      @socket.on_message do |text|
+        Log.debug { "CLIENT : Parsing received messages" }
+        pkg = ServerPackage.from_yaml text
+        Log.info { "CLIENT : #{pkg.messages.size} messages from server #{@address}" }
+        @size += pkg.messages.size
+        @@messages.print pkg.messages.to_yaml[4..]
+        @@messages.flush
+        File.delete @@input_path
       end
       spawn @socket.run
-    end
-
-    def send(message : String)
-      @socket.send message
-    end
-
-    protected def process_buf
-      message = Message.from_yaml @buf.join
-      @buf.clear
-      if @i < @messages.size
-        raise "corrupted" if message != @messages[@i]
-      else
-        send message.text
-      end
     end
 
     def monitor
       last_check : Time? = nil
       loop do
-        this_check = Time.utc
-        if !last_check || File.info(@@path).modification_time > last_check
-          @i = 0
-          File.each_line @@path do |line|
-            if @i > 0
-              process_buf if @buf.size > 0 && line.starts_with? "- "
-              @buf << line[2..]
-            end
-            @i += 1
-          end
-          process_buf
+        if File.exists?(@@input_path) && (!last_check || File.info(@@input_path).modification_time > last_check)
+          Log.debug { "CLIENT : Reading new messages" }
+          new_messages = Array(ClientMessage).from_yaml File.read @@input_path
+          Log.debug { "CLIENT : Sending new messages" }
+          @socket.send ClientPackage.new(@size, new_messages).to_yaml
+          Log.debug { "CLIENT : Sent new messages" }
         end
-        last_check = this_check
+        last_check = Time.utc
         sleep 0.2.seconds
       end
     end
