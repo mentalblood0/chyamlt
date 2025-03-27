@@ -79,6 +79,7 @@ module Chyamlt
           ClientPackage.from_yaml text
         rescue ex
           Log.error { "SERVER : MessageHandler : Error parsing ClientPackage : #{ex.message}" }
+          context.response.status_code = 400
           return
         end
 
