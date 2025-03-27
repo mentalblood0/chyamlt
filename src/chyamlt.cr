@@ -94,6 +94,7 @@ module Chyamlt
         end
 
         context.response.print ServerPackage.new(@messages[pkg.saved..]).to_yaml
+        context.response.headers["Content-Type"] = "application/x-yaml"
       end
     end
 
@@ -161,7 +162,7 @@ module Chyamlt
           end
           if new_messages
             Log.debug { "CLIENT : Sending new messages" }
-            response = @client.post "/", body: ClientPackage.new(@size, new_messages).to_yaml
+            response = @client.post "/", {"Content-Type" => "application/x-yaml"}, ClientPackage.new(@size, new_messages).to_yaml
             Log.debug { "CLIENT : Sent new messages" }
             if !response.success?
               Log.error { "CLIENT : Non-success response #{response.status}" }

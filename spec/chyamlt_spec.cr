@@ -1,8 +1,13 @@
 require "./spec_helper"
 
 describe Chyamlt::Server do
-  it "not vulnerable to size attacks" do
+  Spec.before_each do
     Chyamlt::Server.wipe
+  end
+  Spec.after_each do
+    Chyamlt::Server.wipe
+  end
+  it "not vulnerable to size attacks" do
     server = Chyamlt::Server.new "localhost", 3000
     client = HTTP::Client.new URI.parse "http://localhost:3000"
     size = 9 * 1024
@@ -10,6 +15,5 @@ describe Chyamlt::Server do
     response = client.post "/", body: Chyamlt::ClientPackage.new(0, [big_message]).to_yaml
     server.close
     Chyamlt::Server.messages_file.size.should be < size
-    Chyamlt::Server.wipe
   end
 end
