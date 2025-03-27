@@ -29,12 +29,15 @@ module Chyamlt
     include YAML::Serializable
 
     getter text : String
+
+    def initialize(@text)
+    end
   end
 
   class ClientPackage
     include YAML::Serializable
 
-    getter saved : Int64
+    getter saved : Int32 | Int64
     getter messages : Array(ClientMessage)
 
     def initialize(@saved, @messages)
@@ -70,7 +73,7 @@ module Chyamlt
 
       def call(context)
         Log.debug { "SERVER : MessageHandler : Parsing new messages" }
-        text = IO::Sized.new(context.request.body.not_nil!, 16 * 1024).gets_to_end
+        text = IO::Sized.new(context.request.body.not_nil!, 8 * 1024).gets_to_end
         address = context.request.remote_address.to_s
         pkg = begin
           ClientPackage.from_yaml text
@@ -105,8 +108,9 @@ module Chyamlt
     end
 
     def self.wipe
-      @@messages_file.close
-      File.delete @@messages_path
+      File.open @@messages_path, "w" do |file|
+        file.truncate
+      end
     end
   end
 
@@ -129,7 +133,7 @@ module Chyamlt
       end
     end
 
-    def add_messages(response_body : String)
+    protected def add_messages(response_body : String)
       Log.debug { "CLIENT : Parsing received messages" }
       pkg = begin
         ServerPackage.from_yaml response_body
@@ -185,7 +189,7 @@ end
 
 Log.setup level: Log::Severity::Debug
 
-server = Chyamlt::Server.new "localhost", 3000
-client = Chyamlt::Client.new "localhost", 3000
-spawn client.monitor
-sleep
+# server = Chyamlt::Server.new "localhost", 3000
+# client = Chyamlt::Client.new "localhost", 3000
+# spawn client.monitor
+# sleep
