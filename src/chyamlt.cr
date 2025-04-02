@@ -74,13 +74,15 @@ module Chyamlt
       getter(address) { URI.parse "https://api.telegram.org/" }
       getter(client) { HTTP::Client.new address }
 
+      @offset : Int32? = nil
+
       def initialize(@config : Config)
         spawn run
       end
 
       protected def run
         loop do
-          response = client.get "/bot#{@config.token}/getUpdates", body: {"timeout" => 5, "allowed_updates" => ["message"]}.to_json
+          response = client.get "/bot#{@config.token}/getUpdates", body: {"offset" => @offset, "timeout" => 5, "allowed_updates" => ["message"]}.to_json
           if !response.success?
             puts response.body
             sleep 5.seconds
@@ -89,8 +91,18 @@ module Chyamlt
           JSON.parse(response.body)["result"].as_a.each do |update|
             user_id = update["message"]["from"]["id"].as_i
             user_token = Random::DEFAULT.hex 16
-            token_response = client.get "/bot#{@config.token}/sendMessage", body: {"chat_id" => user_id, "text" => user_token}.to_json
-            puts token_response.body
+
+            io = IO::Memory.new
+            builder = HTTP::FormData::Builder.new io
+            builder.field "chat_id", user_id
+            builder.field "text", user_token
+            builder.finish
+            body = io.to_s
+            headers = HTTP::Headers{"Content-Type" => builder.content_type}
+            token_response = client.get "/bot#{@config.token}/sendMessage", headers: headers, body: body
+
+            @offset = update["update_id"].as_i + 1
+            puts @offset
           end
         end
       end
