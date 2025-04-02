@@ -66,9 +66,8 @@ module Chyamlt
         include YAML::Serializable
 
         getter token : String
-        getter key : String
 
-        def initialize(@token, @key)
+        def initialize(@token)
         end
       end
 
@@ -89,7 +88,7 @@ module Chyamlt
           end
           JSON.parse(response.body)["result"].as_a.each do |update|
             user_id = update["message"]["from"]["id"].as_i
-            user_token = OpenSSL::HMAC.hexdigest OpenSSL::Algorithm::SHA256, @config.key, user_id.to_s
+            user_token = Random::DEFAULT.hex 16
             token_response = client.get "/bot#{@config.token}/sendMessage", body: {"chat_id" => user_id, "text" => user_token}.to_json
             puts token_response.body
           end
@@ -110,7 +109,7 @@ module Chyamlt
       def self.from_file_or_default(path : Path = Server.dir / "config.yml")
         if !File.exists? path
           Dir.mkdir_p path.parent
-          File.write path, Config.new("localhost", 3000, Bot::Config.new("put your bot token here", "secret key for generating users tokens")).to_yaml
+          File.write path, Config.new("localhost", 3000, Bot::Config.new("put your bot token here")).to_yaml
         end
         Config.from_yaml File.new path
       end
