@@ -54,10 +54,43 @@ module Chyamlt
   end
 
   class Server
+    class_property dir
     class_property messages_path
-    class_property messages_file
-    @@messages_path : Path = Chyamlt.dir / "server.yml"
-    @@messages_file = File.new @@messages_path, "a"
+    @@dir : Path = Chyamlt.dir / "server"
+    @@messages_path : Path = @@dir / "messages.yml"
+
+    class Bot
+      class Config
+        include YAML::Serializable
+
+        getter token : String
+
+        def initialize(@token)
+        end
+      end
+
+      def initialize(@config : Config)
+      end
+    end
+
+    class Config
+      include YAML::Serializable
+
+      getter host : String
+      getter port : Int32
+      getter bot : Bot::Config
+
+      def initialize(@host, @port, @bot)
+      end
+
+      def self.from_file_or_default(path : Path = Server.dir / "config.yml")
+        if !File.exists? path
+          Dir.mkdir_p path.parent
+          File.write path, Config.new("localhost", 3000, Bot::Config.new("put your bot token here")).to_yaml
+        end
+        Config.from_yaml File.new path
+      end
+    end
 
     class MessageHandler
       include HTTP::Handler
@@ -66,9 +99,8 @@ module Chyamlt
 
       def initialize
         Dir.mkdir_p Server.messages_path.parent
-        File.open Server.messages_path do |file|
-          @messages = Array(ServerMessage).from_yaml file rescue [] of ServerMessage
-        end
+        @messages = Array(ServerMessage).from_yaml File.new Server.messages_path if File.exists? Server.messages_path
+        @messages_file = File.new Server.messages_path, "a"
       end
 
       def call(context)
@@ -89,8 +121,8 @@ module Chyamlt
         Log.info { "SERVER : MessageHandler : #{new_messages.size} new messages from client #{address} (#{pkg.saved} are already saved)" }
 
         if new_messages.size > 0
-          Server.messages_file.print new_messages.to_yaml[4..]
-          Server.messages_file.flush
+          @messages_file.print new_messages.to_yaml[4..]
+          @messages_file.flush
           @messages += new_messages
         end
 
@@ -99,9 +131,9 @@ module Chyamlt
       end
     end
 
-    def initialize(@host : String, @port : Int32)
+    def initialize(@config : Config = Config.from_file_or_default)
       @server = HTTP::Server.new [HTTP::CompressHandler.new, MessageHandler.new]
-      @address = @server.bind_tcp @host, @port
+      @address = @server.bind_tcp config.host, config.port
       spawn @server.listen
     end
 
@@ -110,6 +142,7 @@ module Chyamlt
     end
 
     def self.wipe
+      return if !File.exists? @@messages_path
       File.open @@messages_path, "w" do |file|
         file.truncate
       end
@@ -117,9 +150,9 @@ module Chyamlt
   end
 
   class Client
-    @@messages_path : Path = Chyamlt.dir / "client.yml"
-    @@messages_file = File.new @@messages_path, "a"
-    @@input_path : Path = Chyamlt.dir / "input.yml"
+    @@dir : Path = Chyamlt.dir / "client"
+    @@messages_path : Path = @@dir / "messages.yml"
+    @@input_path : Path = @@dir / "input.yml"
 
     @size = 0
 
@@ -133,6 +166,7 @@ module Chyamlt
       File.each_line @@messages_path do |line|
         @size += 1 if line.starts_with? "- "
       end
+      @messages_file = File.new @@messages_path, "a"
     end
 
     protected def add_messages(response_body : String)
@@ -146,8 +180,8 @@ module Chyamlt
       Log.info { "CLIENT : #{pkg.messages.size} messages from server #{@address}" }
 
       @size += pkg.messages.size
-      @@messages_file.print pkg.messages.to_yaml[4..]
-      @@messages_file.flush
+      @messages_file.print pkg.messages.to_yaml[4..]
+      @messages_file.flush
       File.delete @@input_path
     end
 
