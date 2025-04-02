@@ -17,7 +17,4 @@ describe Chyamlt::Server do
     server.close
     File.new(Chyamlt::Server.messages_path).size.should be < size
   end
-  it "can use cryptography" do
-    OpenSSL::HMAC.hexdigest(OpenSSL::Algorithm::SHA256, "key", "data")
-  end
 end

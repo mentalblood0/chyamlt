@@ -1,4 +1,5 @@
 require "yaml"
+require "json"
 require "http"
 require "http/server"
 require "http/server/handler"
@@ -64,12 +65,27 @@ module Chyamlt
         include YAML::Serializable
 
         getter token : String
+        getter key : String
 
-        def initialize(@token)
+        def initialize(@token, @key)
         end
       end
 
+      getter(address) { URI.parse "https://api.telegram.org/bot#{@config.token}" }
+      getter(client) { HTTP::Client.new address }
+
       def initialize(@config : Config)
+        spawn run
+      end
+
+      def run
+        loop do
+          response = client.get "getUpdates", body: {"timeout" => 5, "allowed_updates" => ["message"]}.to_json
+          JSON.parse(response.body).as_a.each do |update|
+            user_id = update["message"]["from"]["id"].as_i
+            user_token = OpenSSL::HMAC.hexdigest OpenSSL::Algorithm::SHA256, @config.key, user_id.to_s
+          end
+        end
       end
     end
 
@@ -86,7 +102,7 @@ module Chyamlt
       def self.from_file_or_default(path : Path = Server.dir / "config.yml")
         if !File.exists? path
           Dir.mkdir_p path.parent
-          File.write path, Config.new("localhost", 3000, Bot::Config.new("put your bot token here")).to_yaml
+          File.write path, Config.new("localhost", 3000, Bot::Config.new("put your bot token here", "secret key for generating users tokens")).to_yaml
         end
         Config.from_yaml File.new path
       end
@@ -99,7 +115,9 @@ module Chyamlt
 
       def initialize
         Dir.mkdir_p Server.messages_path.parent
-        @messages = Array(ServerMessage).from_yaml File.new Server.messages_path if File.exists? Server.messages_path
+        if File.exists? Server.messages_path
+          @messages = Array(ServerMessage).from_yaml File.new Server.messages_path rescue [] of ServerMessage
+        end
         @messages_file = File.new Server.messages_path, "a"
       end
 
@@ -134,6 +152,7 @@ module Chyamlt
     def initialize(@config : Config = Config.from_file_or_default)
       @server = HTTP::Server.new [HTTP::CompressHandler.new, MessageHandler.new]
       @address = @server.bind_tcp config.host, config.port
+      @bot = Bot.new @config.bot
       spawn @server.listen
     end
 
