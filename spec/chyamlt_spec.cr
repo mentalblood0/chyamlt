@@ -1,4 +1,3 @@
-require "openssl/hmac"
 require "./spec_helper"
 
 describe Chyamlt::Server do

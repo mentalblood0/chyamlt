@@ -1,6 +1,7 @@
 require "yaml"
 require "json"
 require "http"
+require "openssl/hmac"
 require "http/server"
 require "http/server/handler"
 require "uri"
@@ -71,19 +72,26 @@ module Chyamlt
         end
       end
 
-      getter(address) { URI.parse "https://api.telegram.org/bot#{@config.token}" }
+      getter(address) { URI.parse "https://api.telegram.org/" }
       getter(client) { HTTP::Client.new address }
 
       def initialize(@config : Config)
         spawn run
       end
 
-      def run
+      protected def run
         loop do
-          response = client.get "getUpdates", body: {"timeout" => 5, "allowed_updates" => ["message"]}.to_json
-          JSON.parse(response.body).as_a.each do |update|
+          response = client.get "/bot#{@config.token}/getUpdates", body: {"timeout" => 5, "allowed_updates" => ["message"]}.to_json
+          if !response.success?
+            puts response.body
+            sleep 5.seconds
+            next
+          end
+          JSON.parse(response.body)["result"].as_a.each do |update|
             user_id = update["message"]["from"]["id"].as_i
             user_token = OpenSSL::HMAC.hexdigest OpenSSL::Algorithm::SHA256, @config.key, user_id.to_s
+            token_response = client.get "/bot#{@config.token}/sendMessage", body: {"chat_id" => user_id, "text" => user_token}.to_json
+            puts token_response.body
           end
         end
       end
@@ -244,7 +252,7 @@ end
 
 Log.setup level: Log::Severity::Debug
 
-# server = Chyamlt::Server.new "localhost", 3000
+server = Chyamlt::Server.new
 # client = Chyamlt::Client.new "localhost", 3000
 # spawn client.monitor
-# sleep
+sleep
